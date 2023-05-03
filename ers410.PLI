@@ -1,0 +1,323 @@
+ ERS410 : PROC OPTIONS (MAIN) REORDER ;                                 
+ /*********************************************************************/
+ /*                                                                   */
+ /*  PROJECT : ERS V4 ENHANCEMENT FOR HRMS PROJECT                    */
+ /*  PROGRAM : ERS410                                                 */
+ /*  FUNCTION: VERIFY HRMS INTERFACE FILE                             */
+ /*  AUTHOR  : PATRICIA WU                                            */
+ /*  DATE    : MARCH 9, 2011                                          */
+ /*                                                                   */
+ /*  MODIFIED BY: NONE                                                */
+ /*  INPUT   : HRMSI    - HRMS INTERFACE FILE                         */
+ /*  OUTPUT  : REPORTO  - CONTROL REPORT                              */
+ /*          : RDATEO   - RUN DATE                                    */
+ /*          : SYSPRINT - SYSTEM PRINT                                */
+ /*********************************************************************/
+ /*-------------------------------------------------------------------*/
+ /*                    FILE DECLARATION                               */
+ /*-------------------------------------------------------------------*/
+ DCL HRMSI    FILE RECORD INPUT ;                                       
+ DCL CYCLEI   FILE RECORD INPUT ;                                       
+ DCL CYCLEO   FILE RECORD OUTPUT ;                                      
+ DCL REPORTO  FILE PRINT ;                                              
+ DCL SYSPRINT FILE PRINT ;                                              
+                                                                        
+ /*-------------------------------------------------------------------*/
+ /* DECLARE I/O AREAS FOR FILES (WITH ASSOCIATED POINTERS)            */
+ /*-------------------------------------------------------------------*/
+ DCL   HRMSIN              CHAR(2000) INIT(' '); /*001-2000 INPUT FIL*/ 
+                                                                        
+ DCL 1 HRMS_IN DEFINED HRMSIN,                                          
+       3 EMP_SERIAL_NO     CHAR(6),              /*001-006 EMP_SER_NO*/ 
+       3 FILLER_01         CHAR(38),             /*007-044 FILLER    */ 
+       3 SER_REF_DATE      CHAR(10),             /*045-054 SERVICE RE*/ 
+       3 FILLER_02         CHAR(200),            /*055-254 FILLER    */ 
+       3 HASHNO            CHAR(2),              /*255-256 HASHNO    */ 
+       3 FILLER_23         CHAR(1744);           /*257-2000FILLER    */ 
+                                                                        
+ DCL 1 HEADER_IN DEFINED HRMSIN,                                        
+       3 TITLE             CHAR(6),              /*001-006 HEADER    */ 
+       3 FILE_NAME         CHAR(15),             /*007-021 FILE NAME */ 
+       3 CYCLE_DATE        CHAR(10),             /*022-031 CYCLE     */ 
+       3 SEQ_NO            PIC'(5)9',            /*032-036 SEQUENCE  */ 
+       3 HASH_TTL          PIC'(10)9',           /*037-046 HASH TTL  */ 
+       3 RECORD_COUNT      PIC'(6)9',            /*047-052 TTL RECORD*/ 
+       3 FILLER            CHAR(1948);           /*053-2000 FILLER   */ 
+                                                                        
+ DCL 1 CYCLE_OUT,                                                       
+       3 TITLE             CHAR(6)    INIT(' '), /*001-006 HEADER    */ 
+       3 FILE_NAME         CHAR(15)   INIT(' '), /*007-021 FILE NAME */ 
+       3 CYCLE_DATE        CHAR(10)   INIT(' '), /*022-031 CYCLE     */ 
+       3 SEQ_NO            PIC'(5)9'  INIT(0),   /*032-036 SEQUENCE  */ 
+       3 HASH_TTL          PIC'(10)9' INIT(0),   /*037-046 HASH TTL  */ 
+       3 RECORD_COUNT      PIC'(6)9'  INIT(0),   /*047-052 TTL RECORD*/ 
+       3 FILLER1           CHAR(1948) INIT(' '); /*053-2000FILLER    */ 
+                                                                        
+ DCL 1 CYCLE_IN,                                                        
+       3 TITLE             CHAR(6)    INIT(' '), /*001-006 HEADER    */ 
+       3 FILE_NAME         CHAR(15)   INIT(' '), /*007-021 FILE NAME */ 
+       3 CYCLE_DATE        CHAR(10)   INIT(' '), /*022-031 CYCLE     */ 
+       3 SEQ_NO            PIC'(5)9'  INIT(0),   /*032-036 SEQUENCE  */ 
+       3 HASH_TTL          PIC'(10)9' INIT(0),   /*037-046 HASH TTL  */ 
+       3 RECORD_COUNT      PIC'(6)9'  INIT(0),   /*047-052 TTL RECORD*/ 
+       3 FILLER1           CHAR(1948) INIT(' '); /*053-2000FILLER    */ 
+                                                                        
+ /*-------------------------------------------------------------------*/
+ /* DECLARE COUNTERS AND SWITCHES                                     */
+ /*-------------------------------------------------------------------*/
+ DCL SW_MORE_HRMSI                BIT(1)         INIT('1'B);            
+ DCL SW_VALID                     BIT(1)         INIT('0'B);            
+ DCL MAX_RETC               FIXED BIN(31)        INIT(0);               
+ DCL CTR_HRMSI              FIXED DEC(5)         INIT(0);               
+ DCL CTR_ERROR              FIXED DEC(5)         INIT(0);               
+ DCL CTR_HEADER             FIXED DEC(5)         INIT(0);               
+ DCL ERR_PAGE_NO            FIXED DEC(7)         INIT(0);               
+ DCL WRK_HASH_TTL                 PIC'(10)9'     INIT(0);               
+ DCL WRK_RECORD_COUNT             PIC'(6)9'      INIT(0);               
+ DCL WRK_SEQ_NO                   PIC'(5)9'      INIT(0);               
+                                                                        
+ /*-------------------------------------------------------------------*/
+ /* DECLARE WORKING VARIABLES                                         */
+ /*-------------------------------------------------------------------*/
+ DCL RUN_DATE                     CHAR (10)       INIT(' ');            
+                                                                        
+ /*-------------------------------------------------------------------*/
+ /* DECLARE BUILTIN FUNCTIONS                                         */
+ /*-------------------------------------------------------------------*/
+ DCL PLIRETC                      BUILTIN;                              
+ DCL STRING                       BUILTIN;                              
+ DCL CHAR                         BUILTIN;                              
+ DCL SUBSTR                       BUILTIN;                              
+ DCL MAX                          BUILTIN;                              
+ DCL MOD                          BUILTIN;                              
+ DCL DATETIME                     BUILTIN;                              
+ DCL VERIFY                       BUILTIN;                              
+ DCL ADDR                         BUILTIN;                              
+ DCL NULL                         BUILTIN;                              
+                                                                        
+ /*-------------------------------------------------------------------*/
+ /* ON CONDITION PROCESS                                              */
+ /*-------------------------------------------------------------------*/
+ ON ERROR                                                               
+ BEGIN;                                                                 
+    ON ERROR SYSTEM;                                                    
+    CALL P000_ERROR_ROUTINE;                                            
+ END;                                                                   
+                                                                        
+ ON ENDFILE(HRMSI) SW_MORE_HRMSI = '0'B ;                               
+ ON ENDPAGE (REPORTO)                                                   
+ BEGIN;                                                                 
+    PUT FILE (REPORTO) PAGE;                                            
+ END;                                                                   
+                                                                        
+ /*-------------------------------------------------------------------*/
+ /* INITIALIZATION                                                    */
+ /*-------------------------------------------------------------------*/
+ OPEN FILE(HRMSI),                                                      
+      FILE(CYCLEI) ,                                                    
+      FILE(CYCLEO) ,                                                    
+      FILE(REPORTO) ,                                                   
+      FILE(SYSPRINT);                                                   
+                                                                        
+ RUN_DATE = (SUBSTR(DATETIME, 1, 4) ||                                  
+          '-' || SUBSTR(DATETIME, 5, 2) ||                              
+          '-' || SUBSTR(DATETIME, 7, 2));                               
+ CALL P999_CONTROL_HEADING;                                             
+                                                                        
+ /*-------------------------------------------------------------------*/
+ /*                          MAIN LOGIC                               */
+ /*-------------------------------------------------------------------*/
+ READ FILE(CYCLEI) INTO (CYCLE_IN) ;                                    
+ CALL READ_HRMSI ;                                                      
+ DO WHILE(SW_MORE_HRMSI) ;                                              
+    CALL READ_HRMSI ;                                                   
+ END ;                                                                  
+ CALL CHECK_HASH_TTL ;                                                  
+ CALL CHECK_RECORD_COUNT ;                                              
+ IF SW_VALID = '0'B THEN                                                
+    WRITE FILE (CYCLEO) FROM (CYCLE_OUT);                               
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /* CLOSING                                                          */ 
+ /*------------------------------------------------------------------*/ 
+ CALL P999_CONTROL_REPORT;                                              
+ CALL PLIRETC(MAX_RETC) ;                                               
+ CLOSE FILE(HRMSI) ,                                                    
+       FILE(CYCLEI) ,                                                   
+       FILE(CYCLEO) ,                                                   
+       FILE(REPORTO) ,                                                  
+       FILE(SYSPRINT);                                                  
+ RETURN ;                                                               
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /*  READ HRMS INTERFACE FILE                                        */ 
+ /*------------------------------------------------------------------*/ 
+  READ_HRMSI : PROC;                                                    
+    READ FILE(HRMSI) INTO (HRMSIN) ;                                    
+    IF (SW_MORE_HRMSI) THEN                                             
+       DO ;                                                             
+       IF HEADER_IN.TITLE = 'HEADER' THEN                               
+          DO ;                                                          
+            CTR_HEADER = CTR_HEADER + 1;                                
+            CYCLE_OUT = HEADER_IN, BY NAME ;                            
+            CALL CHECK_FILE_NAME ;                                      
+            CALL CHECK_SEQ_NO ;                                         
+            IF CTR_HEADER > 1 THEN                                      
+               DO ;                                                     
+                 PUT FILE(REPORTO) SKIP(1) EDIT                         
+                      ('HEADER IS MORE THAN ONE LINE !') (COL (1), A);  
+                 MAX_RETC = 4 ;                                         
+                 SW_VALID = '1'B ;                                      
+               END ;                                                    
+          END ;                                                         
+       ELSE                                                             
+         DO ;                                                           
+           CALL CHECK_HASHNO ;                                          
+           CTR_HRMSI = CTR_HRMSI + 1 ;                                  
+           WRK_HASH_TTL = WRK_HASH_TTL + HRMS_IN.HASHNO ;               
+           WRK_RECORD_COUNT = WRK_RECORD_COUNT + 1;                     
+         END ;                                                          
+    END ;                                                               
+ END READ_HRMSI ;                                                       
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /*  CHECK FILE NAME                                                 */ 
+ /*------------------------------------------------------------------*/ 
+ CHECK_FILE_NAME : PROC ;                                               
+    IF HEADER_IN.FILE_NAME ¬= 'TWERSA' THEN                             
+      DO ;                                                              
+        PUT FILE(REPORTO) SKIP(1) EDIT                                  
+                          ('FILE NAME IS ERROR !') (COL (1), A);        
+        MAX_RETC = 4 ;                                                  
+        SW_VALID = '1'B ;                                               
+      END ;                                                             
+ END CHECK_FILE_NAME ;                                                  
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /*  CHECK CYCLE NUMBER                                              */ 
+ /*------------------------------------------------------------------*/ 
+ CHECK_SEQ_NO : PROC ;                                                  
+    WRK_SEQ_NO = CYCLE_IN.SEQ_NO + 1 ;                                  
+    IF HEADER_IN.SEQ_NO ¬= WRK_SEQ_NO THEN                              
+      DO ;                                                              
+        PUT FILE(REPORTO) SKIP(1) EDIT                                  
+            ('CYCLE NUMBER IS ERROR !') (COL (1), A);                   
+        PUT FILE(REPORTO) SKIP(2) EDIT                                  
+            ('THE EXPECTED CYCLE IS :', WRK_SEQ_NO)                     
+            (COL (1), A, P'99999');                                     
+        PUT FILE(REPORTO) SKIP(1) EDIT                                  
+            ('THE CYCLE OF HEADER IS :', HEADER_IN.SEQ_NO)              
+            (COL (1), A, P'99999');                                     
+        MAX_RETC = 4 ;                                                  
+        SW_VALID = '1'B ;                                               
+      END ;                                                             
+                                                                        
+ END CHECK_SEQ_NO ;                                                     
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /*  CHECK HASNNO IS VALID OR NOT                                    */ 
+ /*------------------------------------------------------------------*/ 
+ CHECK_HASHNO : PROC ;                                                  
+    IF (SUBSTR(HRMS_IN.SER_REF_DATE,9,2) ¬= HRMS_IN.HASHNO |            
+        VERIFY(HRMS_IN.HASHNO,'0123456789') ¬= 0 ) THEN                 
+        DO ;                                                            
+          CTR_ERROR = CTR_ERROR + 1;                                    
+          CALL P999_CONTROL_DETAIL;                                     
+          SW_VALID = '1'B ;                                             
+        END ;                                                           
+ END CHECK_HASHNO ;                                                     
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /*  CHECK HASH TTL                                                  */ 
+ /*------------------------------------------------------------------*/ 
+ CHECK_HASH_TTL : PROC ;                                                
+    IF CYCLE_OUT.HASH_TTL ¬= WRK_HASH_TTL THEN                          
+      DO ;                                                              
+        PUT FILE(REPORTO) SKIP(1) EDIT                                  
+                          ('HASH TOTAL IS ERROR !') (COL (1), A);       
+        MAX_RETC = 4 ;                                                  
+        SW_VALID = '1'B ;                                               
+      END ;                                                             
+ END CHECK_HASH_TTL ;                                                   
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /*  CHECK RECORD COUNT                                              */ 
+ /*------------------------------------------------------------------*/ 
+ CHECK_RECORD_COUNT : PROC ;                                            
+    IF CYCLE_OUT.RECORD_COUNT ¬= WRK_RECORD_COUNT THEN                  
+      DO ;                                                              
+        PUT FILE(REPORTO) SKIP(1) EDIT                                  
+                          ('RECORD COUNT IS ERROR !') (COL (1), A);     
+        MAX_RETC = 4 ;                                                  
+        SW_VALID = '1'B ;                                               
+      END ;                                                             
+ END CHECK_RECORD_COUNT ;                                               
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /* PRINT THE ERROR REPORT HEADING                                   */ 
+ /*------------------------------------------------------------------*/ 
+ P999_CONTROL_HEADING:                                                  
+   PROC;                                                                
+   ERR_PAGE_NO = ERR_PAGE_NO + 1;                                       
+   PUT FILE(REPORTO) SKIP(1) EDIT                                       
+      ('PROGRAM : ERS410 ','*** HRMS I/F FILE CONTROL REPORT ***',      
+       'RUN DATE : ', RUN_DATE)                                         
+      (COL (1), A, COL(19), A, COL (56), A, A);                         
+   PUT FILE(REPORTO) SKIP(1) EDIT                                       
+      ('PAGE     :', ERR_PAGE_NO)(COL (56), A, P'ZZZZ9');               
+ END P999_CONTROL_HEADING;                                              
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /* PRINT THE ERROR REPORT DETAIL                                    */ 
+ /*------------------------------------------------------------------*/ 
+ P999_CONTROL_DETAIL:                                                   
+   PROC;                                                                
+   PUT FILE(REPORTO) SKIP(2) EDIT                                       
+      ('HASH NO IS INVALID WITH SERICAL NO. :', HRMS_IN.EMP_SERIAL_NO)  
+      (COL(1), A, COL (39), A);                                         
+ END P999_CONTROL_DETAIL;                                               
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /* PRINT THE CONTROL REPORT                                         */ 
+ /*------------------------------------------------------------------*/ 
+ P999_CONTROL_REPORT:                                                   
+   PROC;                                                                
+   PUT FILE(REPORTO) SKIP(2) EDIT                                       
+      ('           ')(COL (1), A);                                      
+   PUT FILE(REPORTO) SKIP(2) EDIT                                       
+      ('*COUNTERS*:')(COL (1), A);                                      
+   PUT FILE(REPORTO) SKIP(2) EDIT                                       
+      ('           ')(COL (1), A);                                      
+   PUT FILE(REPORTO) SKIP(3) EDIT                                       
+      ('A.  HRMS I/F HEADER RECORDS . . . . . . . . : ', CTR_HEADER)    
+      (COL (1), A, F (5));                                              
+   PUT FILE(REPORTO) SKIP(2) EDIT                                       
+      ('B.  HRMS I/F INPUT RECORDS. . . . . . . . . : ', CTR_HRMSI )    
+      (COL (1), A, F (5));                                              
+   PUT FILE(REPORTO) SKIP(2) EDIT                                       
+      ('C.  HASH NO ERROR RECORDS . . . . . . . . . : ', CTR_ERROR )    
+      (COL (1), A, F (5));                                              
+   PUT FILE(REPORTO) SKIP(2) EDIT                                       
+      ('           ')(COL (1), A);                                      
+   PUT FILE(REPORTO) SKIP(4) EDIT                                       
+      ('    PROGRAM ENDED WITH CONDITION CODE : ', MAX_RETC)            
+      (COL (1), A, F (7));                                              
+ END P999_CONTROL_REPORT;                                               
+                                                                        
+ P000_ERROR_ROUTINE:                                                    
+   PROC;                                                                
+ /*------------------------------------------------------------------*/ 
+ /* GENERAL ERROR HANDLING ROUTINE                                   */ 
+ /*------------------------------------------------------------------*/ 
+   CALL PLIRETC (16);                                                   
+   MAX_RETC = MAX (MAX_RETC, 16);                                       
+         /* MAX_RETC WILL BE DISPLAYED ON THE CONTROL REPORT */         
+   CALL P999_CONTROL_REPORT;                                            
+         /* THE CONTROL REPORT THAT SHOWS COUNTERS */                   
+   PUT SKIP DATA;                                                       
+ END P000_ERROR_ROUTINE;                                                
+                                                                        
+ /*------------------------------------------------------------------*/ 
+ /* END OF PROGRAM                                                   */ 
+ /*------------------------------------------------------------------*/ 
+ END ERS410 ;                                                           
